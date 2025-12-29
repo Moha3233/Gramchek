@@ -4,293 +4,158 @@ import re
 from collections import Counter
 import textstat
 
-# --------------------------------------------------
-# Page config
-# --------------------------------------------------
+# ---------------- PAGE CONFIG ----------------
 st.set_page_config(
-    page_title="Resume Quality Analyzer",
+    page_title="ATS Resume Analyzer",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
-# --------------------------------------------------
-# Modern SaaS UI (CSS)
-# --------------------------------------------------
+# ---------------- CUSTOM CSS ----------------
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-html, body, [class*="css"] {
-    font-family: 'Inter', sans-serif;
+body {
+    background-color: #0e1628;
+    color: #ffffff;
 }
-
-.stApp {
-    background: radial-gradient(circle at top, #020617 0%, #020617 100%);
-    color: #e5e7eb;
-}
-
-/* Hero */
-.hero {
-    padding: 3rem 1rem 2.5rem;
-    text-align: center;
-}
-.hero h1 {
-    font-size: 3rem;
-    font-weight: 700;
-}
-.hero p {
-    font-size: 1.1rem;
-    color: #94a3b8;
-}
-
-/* Cards */
 .card {
-    background: rgba(15, 23, 42, 0.75);
-    backdrop-filter: blur(14px);
-    border: 1px solid #1e293b;
-    border-radius: 18px;
-    padding: 24px;
-    margin-bottom: 22px;
-}
-
-/* Score */
-.score {
-    font-size: 4rem;
-    font-weight: 700;
-    color: #22c55e;
-    text-align: center;
-    margin-bottom: 8px;
-}
-
-/* Issues */
-.issue {
-    background: #020617;
-    border-left: 4px solid #ef4444;
-    padding: 14px 16px;
-    border-radius: 12px;
-    margin-bottom: 12px;
-}
-
-/* Success */
-.success {
-    background: #020617;
-    border-left: 4px solid #22c55e;
-    padding: 18px;
+    background: linear-gradient(145deg, #111c33, #0b1224);
+    padding: 20px;
     border-radius: 14px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 25px rgba(0,0,0,0.35);
 }
-
-/* Highlight */
-mark {
-    color: #020617;
-    font-weight: 500;
-    border-radius: 4px;
+.score {
+    font-size: 42px;
+    font-weight: 700;
+}
+.issue {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-left: 4px solid #ff5c5c;
+    background-color: rgba(255,92,92,0.08);
+    border-radius: 6px;
+}
+.good {
+    border-left: 4px solid #4ade80;
+    background-color: rgba(74,222,128,0.08);
+}
+.highlight {
+    background-color: rgba(255, 0, 0, 0.35);
     padding: 2px 4px;
+    border-radius: 4px;
 }
-
-/* Footer */
-.footer {
-    color: #64748b;
-    font-size: 0.85rem;
-    text-align: center;
-    margin: 40px 0 10px;
+small {
+    color: #9ca3af;
 }
 </style>
 """, unsafe_allow_html=True)
 
-# --------------------------------------------------
-# Hero header
-# --------------------------------------------------
-st.markdown("""
-<div class="hero">
-    <h1>Resume Quality Analyzer</h1>
-    <p>Enhancv-style diagnostics · ATS-safe · Rule-based · Deterministic</p>
-</div>
-""", unsafe_allow_html=True)
-
-# --------------------------------------------------
-# PDF text extraction
-# --------------------------------------------------
-def extract_text(file):
+# ---------------- HELPERS ----------------
+def extract_text(pdf):
     text = ""
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-    return text
+    with pdfplumber.open(pdf) as p:
+        for page in p.pages:
+            text += page.extract_text() + "\n"
+    return text.strip()
 
-# --------------------------------------------------
-# Highlight helper
-# --------------------------------------------------
-def highlight_text(text, words, color):
-    for w in words:
-        pattern = re.escape(w)
-        text = re.sub(
-            pattern,
-            f"<mark style='background-color:{color};'>{w}</mark>",
-            text,
-            flags=re.IGNORECASE
-        )
-    return text
-
-# --------------------------------------------------
-# Checks (UNCHANGED LOGIC)
-# --------------------------------------------------
-def spelling_errors(text):
-    known = ["begginer", "enviornment", "analysing"]
-    return [w for w in known if w in text.lower()]
-
-def unnecessary_caps(text):
-    suspects = ["Systems Biology", "Biological Datasets", "Mathematical Modeling"]
-    return [w for w in suspects if w in text]
-
-def repeated_words(text):
-    words = re.findall(r"\b[a-zA-Z]{4,}\b", text.lower())
-    freq = Counter(words)
-    return [w for w, c in freq.items() if c > 7]
-
-def smart_chars(text):
-    return bool(re.search(r"[–—“”]", text))
+def smart_punctuation(text):
+    return bool(re.search(r"[“”‘’]", text))
 
 def broken_sentences(text):
-    return bool(re.search(r"[a-z,]\n[a-z]", text))
-
-def passive_voice(text):
-    return bool(re.search(r"\b(was|were|been|being)\b\s+\w+ed", text.lower()))
-
-def tense_mismatch(text):
-    return bool(re.search(r"\bdeveloped\b", text.lower()) and re.search(r"\bdevelops\b", text.lower()))
+    return bool(re.search(r"[a-z]\n[a-z]", text))
 
 def long_sentences(text):
-    return len([s for s in text.split(".") if len(s.split()) > 30])
+    sentences = re.split(r"[.!?]", text)
+    return any(len(s.split()) > 30 for s in sentences)
 
-def missing_section(text, section):
-    return section.upper() not in text.upper()
-
-def empty_sections(text):
-    return re.findall(r"\n([A-Z ]{4,})\n\s*\n", text)
-
-def skills_repetition(text):
-    return text.lower().count("python") > 6
-
-def soft_skill_overuse(text):
-    soft = ["motivated", "hardworking", "dedicated"]
-    return sum(text.lower().count(w) for w in soft) > 3
-
-def length_issue(text):
-    wc = len(text.split())
-    return wc < 350 or wc > 900
+def repetition(text):
+    words = re.findall(r"\b[a-zA-Z]{4,}\b", text.lower())
+    freq = Counter(words)
+    return any(v > 10 for v in freq.values())
 
 def readability_issue(text):
-    return textstat.flesch_reading_ease(text) < 30
+    return textstat.flesch_reading_ease(text) < 40
 
-# --------------------------------------------------
-# Input
-# --------------------------------------------------
-st.markdown('<div class="card">', unsafe_allow_html=True)
-uploaded_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"])
-resume_text = st.text_area("Or paste resume text", height=220)
-st.markdown('</div>', unsafe_allow_html=True)
+def highlight_text(text):
+    text = re.sub(r"[“”‘’]", r"<span class='highlight'>\g<0></span>", text)
+    text = re.sub(r"([a-z])\n([a-z])", r"\1<span class='highlight'>↵</span>\2", text)
+    sentences = re.split(r"([.!?])", text)
+    rebuilt = ""
+    for i in range(0, len(sentences)-1, 2):
+        sentence = sentences[i]
+        punct = sentences[i+1]
+        if len(sentence.split()) > 30:
+            sentence = f"<span class='highlight'>{sentence}</span>"
+        rebuilt += sentence + punct
+    return rebuilt
 
-if uploaded_file:
-    resume_text = extract_text(uploaded_file)
+# ---------------- APP ----------------
+st.title("📄 ATS Resume Quality Analyzer")
 
-# --------------------------------------------------
-# Analysis + Display
-# --------------------------------------------------
-if resume_text:
+uploaded = st.file_uploader("Upload Resume (PDF only)", type=["pdf"])
+
+if uploaded:
+    resume_text = extract_text(uploaded)
+
     issues = []
-    preview_text = resume_text
+    score = 100
 
-    spell = spelling_errors(resume_text)
-    caps = unnecessary_caps(resume_text)
-    reps = repeated_words(resume_text)
-
-    if spell:
-        issues.append("Possible spelling mistakes detected")
-        preview_text = highlight_text(preview_text, spell, "#fecaca")
-
-    if caps:
-        issues.append("Unnecessary capitalization of common nouns")
-        preview_text = highlight_text(preview_text, caps, "#fde68a")
-
-    if reps:
-        issues.append("Repeated words detected")
-        preview_text = highlight_text(preview_text, reps[:5], "#bfdbfe")
-
-    if smart_chars(resume_text):
-        issues.append("Smart punctuation detected")
+    if smart_punctuation(resume_text):
+        issues.append("Smart punctuation detected (ATS may fail).")
+        score -= 2
 
     if broken_sentences(resume_text):
-        issues.append("Sentence broken across lines")
+        issues.append("Sentence broken across lines.")
+        score -= 3
 
-    if passive_voice(resume_text):
-        issues.append("Passive voice detected")
+    if long_sentences(resume_text):
+        issues.append("Overly long sentences detected.")
+        score -= 3
 
-    if tense_mismatch(resume_text):
-        issues.append("Verb tense inconsistency")
-
-    if long_sentences(resume_text) > 2:
-        issues.append("Overly long sentences")
-
-    for sec in ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS"]:
-        if missing_section(resume_text, sec):
-            issues.append(f"Missing section: {sec.title()}")
-
-    if empty_sections(resume_text):
-        issues.append("Empty section headings found")
-
-    if skills_repetition(resume_text):
-        issues.append("Skill keyword over-repetition")
-
-    if soft_skill_overuse(resume_text):
-        issues.append("Soft skill overuse detected")
-
-    if length_issue(resume_text):
-        issues.append("Resume length outside optimal range")
+    if repetition(resume_text):
+        issues.append("Repetitive words reduce ATS clarity.")
+        score -= 2
 
     if readability_issue(resume_text):
-        issues.append("Low readability score")
+        issues.append("Low readability score.")
+        score -= 3
 
-    # Score
-    score = 100 - (len(issues) * 2)
-    score = max(score, 80)
+    score = max(score, 0)
 
-    # Layout
-    col1, col2 = st.columns([2, 1.3])
+    # ---------------- MAIN PANEL ----------------
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("## Overall Score")
+    st.markdown(f"<div class='score'>{score}/100</div>", unsafe_allow_html=True)
+    st.progress(score / 100)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-    with col1:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown(f"<div class='score'>{score}%</div>", unsafe_allow_html=True)
-        st.progress(score / 100)
-        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("## Issues Detected")
+    if issues:
+        for i in issues:
+            st.markdown(f"<div class='issue'>⚠️ {i}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='issue good'>✅ No issues detected</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Analysis Report")
-        if issues:
-            for issue in issues:
-                st.markdown(f"<div class='issue'>⚠️ {issue}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='success'>✅ Resume is ATS-ready and professionally written.</div>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    with col2:
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.markdown("### Resume Preview")
+    # ---------------- SIDEBAR PREVIEW ----------------
+    with st.sidebar:
+        st.markdown("## Resume Preview")
         st.markdown(
             f"""
-            <div style="height:650px; overflow-y:auto; white-space:pre-wrap; font-size:0.88rem; line-height:1.5;">
-            {preview_text}
+            <div style="
+                height:80vh;
+                overflow-y:auto;
+                white-space:pre-wrap;
+                font-size:0.85rem;
+                line-height:1.6;
+            ">
+            {highlight_text(resume_text)}
             </div>
             """,
             unsafe_allow_html=True
         )
-        st.markdown('</div>', unsafe_allow_html=True)
 
-# --------------------------------------------------
-# Footer
-# --------------------------------------------------
-st.markdown("""
-<div class="footer">
-Rule-based resume checker · No AI hallucination · Built for ATS precision
-</div>
-""", unsafe_allow_html=True)
+else:
+    st.info("Upload a PDF resume to begin analysis.")
