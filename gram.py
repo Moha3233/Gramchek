@@ -7,8 +7,7 @@ import textstat
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="ATS Resume Analyzer",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
 
 # ---------------- CUSTOM CSS ----------------
@@ -22,8 +21,8 @@ body {
     background: linear-gradient(145deg, #111c33, #0b1224);
     padding: 20px;
     border-radius: 14px;
-    margin-bottom: 20px;
-    box-shadow: 0 8px 25px rgba(0,0,0,0.35);
+    margin-bottom: 18px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
 }
 .score {
     font-size: 42px;
@@ -40,10 +39,23 @@ body {
     border-left: 4px solid #4ade80;
     background-color: rgba(74,222,128,0.08);
 }
+.resume-panel {
+    background: #0b1224;
+    padding: 18px;
+    border-radius: 14px;
+    height: 88vh;
+    overflow-y: auto;
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+}
 .highlight {
     background-color: rgba(255, 0, 0, 0.35);
     padding: 2px 4px;
     border-radius: 4px;
+}
+.section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 12px;
 }
 small {
     color: #9ca3af;
@@ -56,7 +68,9 @@ def extract_text(pdf):
     text = ""
     with pdfplumber.open(pdf) as p:
         for page in p.pages:
-            text += page.extract_text() + "\n"
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
     return text.strip()
 
 def smart_punctuation(text):
@@ -80,6 +94,7 @@ def readability_issue(text):
 def highlight_text(text):
     text = re.sub(r"[“”‘’]", r"<span class='highlight'>\g<0></span>", text)
     text = re.sub(r"([a-z])\n([a-z])", r"\1<span class='highlight'>↵</span>\2", text)
+
     sentences = re.split(r"([.!?])", text)
     rebuilt = ""
     for i in range(0, len(sentences)-1, 2):
@@ -90,7 +105,7 @@ def highlight_text(text):
         rebuilt += sentence + punct
     return rebuilt
 
-# ---------------- APP ----------------
+# ---------------- UI ----------------
 st.title("📄 ATS Resume Quality Analyzer")
 
 uploaded = st.file_uploader("Upload Resume (PDF only)", type=["pdf"])
@@ -102,7 +117,7 @@ if uploaded:
     score = 100
 
     if smart_punctuation(resume_text):
-        issues.append("Smart punctuation detected (ATS may fail).")
+        issues.append("Smart punctuation detected (ATS incompatible).")
         score -= 2
 
     if broken_sentences(resume_text):
@@ -123,39 +138,39 @@ if uploaded:
 
     score = max(score, 0)
 
-    # ---------------- MAIN PANEL ----------------
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("## Overall Score")
-    st.markdown(f"<div class='score'>{score}/100</div>", unsafe_allow_html=True)
-    st.progress(score / 100)
-    st.markdown("</div>", unsafe_allow_html=True)
+    # ---------------- LAYOUT ----------------
+    left, right = st.columns([1.9, 1.1], gap="large")
 
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("## Issues Detected")
-    if issues:
-        for i in issues:
-            st.markdown(f"<div class='issue'>⚠️ {i}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='issue good'>✅ No issues detected</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    # -------- LEFT: ANALYSIS --------
+    with left:
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("## Overall Score")
+        st.markdown(f"<div class='score'>{score}/100</div>", unsafe_allow_html=True)
+        st.progress(score / 100)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    # ---------------- SIDEBAR PREVIEW ----------------
-    with st.sidebar:
-        st.markdown("## Resume Preview")
+        st.markdown("<div class='card'>", unsafe_allow_html=True)
+        st.markdown("## Issues Detected")
+        if issues:
+            for issue in issues:
+                st.markdown(f"<div class='issue'>⚠️ {issue}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='issue good'>✅ No issues detected</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # -------- RIGHT: PERMANENT RESUME VIEW --------
+    with right:
+        st.markdown("<div class='resume-panel'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Resume Preview</div>", unsafe_allow_html=True)
         st.markdown(
             f"""
-            <div style="
-                height:80vh;
-                overflow-y:auto;
-                white-space:pre-wrap;
-                font-size:0.85rem;
-                line-height:1.6;
-            ">
+            <div style="white-space:pre-wrap; font-size:0.85rem; line-height:1.6;">
             {highlight_text(resume_text)}
             </div>
             """,
             unsafe_allow_html=True
         )
+        st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.info("Upload a PDF resume to begin analysis.")
