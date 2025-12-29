@@ -1,56 +1,60 @@
 import streamlit as st
-import language_tool_python
+import requests
 from typing import List, Dict
-import re
+import json
 
-# Initialize the grammar checker
-@st.cache_resource
-def load_grammar_tool():
-    """Load and cache the LanguageTool grammar checker"""
-    return language_tool_python.LanguageTool('en-US')
+# Use LanguageTool API (free public instance)
+LANGUAGETOOL_API = "https://api.languagetool.org/v2/check"
 
-def highlight_text(text: str, matches: List) -> str:
-    """Highlight errors in the text using HTML"""
+def check_grammar(text: str, language: str = "en-US") -> Dict:
+    """Check grammar using LanguageTool public API"""
+    try:
+        data = {
+            'text': text,
+            'language': language
+        }
+        response = requests.post(LANGUAGETOOL_API, data=data, timeout=10)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Error connecting to grammar check service: {e}")
+        return None
+
+def apply_corrections(text: str, matches: List[Dict]) -> str:
+    """Apply all corrections to the text"""
     if not matches:
         return text
     
     # Sort matches by offset in reverse to avoid index shifting
-    sorted_matches = sorted(matches, key=lambda x: x.offset, reverse=True)
+    sorted_matches = sorted(matches, key=lambda x: x['offset'], reverse=True)
     
-    highlighted = text
+    corrected = text
     for match in sorted_matches:
-        start = match.offset
-        end = match.offset + match.errorLength
-        error_text = text[start:end]
-        
-        # Create tooltip with suggestion
-        suggestion = match.replacements[0] if match.replacements else "No suggestion"
-        tooltip = f'<span style="background-color: #ffcccc; border-bottom: 2px solid red; cursor: help;" title="{match.message} | Suggestion: {suggestion}">{error_text}</span>'
-        
-        highlighted = highlighted[:start] + tooltip + highlighted[end:]
+        if match['replacements']:
+            start = match['offset']
+            end = match['offset'] + match['length']
+            replacement = match['replacements'][0]['value']
+            corrected = corrected[:start] + replacement + corrected[end:]
     
-    return highlighted
+    return corrected
 
-def get_error_details(matches: List) -> List[Dict]:
+def get_error_details(matches: List[Dict]) -> List[Dict]:
     """Extract detailed information about each error"""
     errors = []
     for i, match in enumerate(matches, 1):
+        context = match.get('context', {})
+        error_text = context.get('text', '')[context.get('offset', 0):context.get('offset', 0) + context.get('length', 0)]
+        
         error_info = {
             'number': i,
-            'error_text': match.context[match.offsetInContext:match.offsetInContext + match.errorLength],
-            'message': match.message,
-            'suggestions': match.replacements[:3] if match.replacements else ['No suggestions available'],
-            'rule': match.ruleId,
-            'category': match.category
+            'error_text': error_text,
+            'message': match.get('message', 'No description'),
+            'suggestions': [r['value'] for r in match.get('replacements', [])[:3]] or ['No suggestions available'],
+            'rule': match.get('rule', {}).get('id', 'Unknown'),
+            'category': match.get('rule', {}).get('category', {}).get('name', 'Unknown')
         }
         errors.append(error_info)
     return errors
-
-def apply_correction(text: str, match, suggestion: str) -> str:
-    """Apply a single correction to the text"""
-    start = match.offset
-    end = match.offset + match.errorLength
-    return text[:start] + suggestion + text[end:]
 
 # Streamlit App Configuration
 st.set_page_config(
@@ -94,6 +98,8 @@ if 'corrected_text' not in st.session_state:
     st.session_state.corrected_text = ""
 if 'matches' not in st.session_state:
     st.session_state.matches = []
+if 'original_text' not in st.session_state:
+    st.session_state.original_text = ""
 
 # Main layout
 col1, col2 = st.columns([1, 1])
@@ -119,7 +125,8 @@ with col1:
         "Enter your text here:",
         value=default_text,
         height=300,
-        placeholder="Type or paste your text here..."
+        placeholder="Type or paste your text here...",
+        key="input_text"
     )
     
     col_btn1, col_btn2 = st.columns(2)
@@ -134,23 +141,24 @@ with col2:
     if clear_button:
         st.session_state.corrected_text = ""
         st.session_state.matches = []
+        st.session_state.original_text = ""
         st.rerun()
     
     if check_button and user_input:
         with st.spinner("Checking grammar..."):
-            tool = load_grammar_tool()
-            matches = tool.check(user_input)
-            st.session_state.matches = matches
+            result = check_grammar(user_input)
             
-            if matches:
-                # Auto-correct all errors
-                corrected = user_input
-                for match in reversed(matches):
-                    if match.replacements:
-                        corrected = apply_correction(corrected, match, match.replacements[0])
-                st.session_state.corrected_text = corrected
-            else:
-                st.session_state.corrected_text = user_input
+            if result:
+                matches = result.get('matches', [])
+                st.session_state.matches = matches
+                st.session_state.original_text = user_input
+                
+                if matches:
+                    # Auto-correct all errors
+                    corrected = apply_corrections(user_input, matches)
+                    st.session_state.corrected_text = corrected
+                else:
+                    st.session_state.corrected_text = user_input
     
     if st.session_state.corrected_text:
         st.text_area(
@@ -160,8 +168,11 @@ with col2:
             key="corrected_output"
         )
         
-        # Copy button
-        st.code(st.session_state.corrected_text, language=None)
+        # Copy button hint
+        if st.session_state.corrected_text != st.session_state.original_text:
+            st.success("✨ Text has been corrected! You can copy it from above.")
+        else:
+            st.info("👍 No corrections needed!")
 
 # Statistics and Errors Section
 if check_button and user_input:
@@ -195,11 +206,12 @@ if check_button and user_input:
             with st.expander(f"❌ Error {error['number']}: {error['error_text']}", expanded=False):
                 st.markdown(f"**Issue:** {error['message']}")
                 st.markdown(f"**Category:** {error['category']}")
+                st.markdown(f"**Rule ID:** {error['rule']}")
                 
                 if error['suggestions'][0] != 'No suggestions available':
                     st.markdown("**Suggestions:**")
                     for i, sugg in enumerate(error['suggestions'], 1):
-                        st.markdown(f"{i}. {sugg}")
+                        st.markdown(f"{i}. **{sugg}**")
                 else:
                     st.info("No suggestions available for this error.")
     else:
@@ -210,6 +222,7 @@ st.divider()
 st.markdown("""
     <div style='text-align: center; color: #666; padding: 1rem;'>
         <p>💡 <strong>Tips:</strong> This tool checks for grammar, spelling, punctuation, and style issues.</p>
-        <p>Powered by LanguageTool | Built with Streamlit</p>
+        <p>Powered by LanguageTool API | Built with Streamlit</p>
+        <p style='font-size: 0.8rem; color: #999;'>Using free public API - for heavy usage, consider self-hosting</p>
     </div>
 """, unsafe_allow_html=True)
