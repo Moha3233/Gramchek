@@ -7,8 +7,18 @@ import textstat
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
     page_title="ATS Resume Analyzer",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="collapsed"
 )
+
+# ---------------- HIDE SIDEBAR COMPLETELY ----------------
+st.markdown("""
+<style>
+[data-testid="stSidebar"] {
+    display: none;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------- CUSTOM CSS ----------------
 st.markdown("""
@@ -17,28 +27,13 @@ body {
     background-color: #0e1628;
     color: #ffffff;
 }
-.card {
-    background: linear-gradient(145deg, #111c33, #0b1224);
-    padding: 20px;
-    border-radius: 14px;
-    margin-bottom: 18px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+
+.main-grid {
+    display: grid;
+    grid-template-columns: 42% 58%;
+    gap: 24px;
 }
-.score {
-    font-size: 42px;
-    font-weight: 700;
-}
-.issue {
-    padding: 12px;
-    margin-bottom: 8px;
-    border-left: 4px solid #ff5c5c;
-    background-color: rgba(255,92,92,0.08);
-    border-radius: 6px;
-}
-.good {
-    border-left: 4px solid #4ade80;
-    background-color: rgba(74,222,128,0.08);
-}
+
 .resume-panel {
     background: #0b1224;
     padding: 18px;
@@ -47,16 +42,45 @@ body {
     overflow-y: auto;
     box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
 }
+
+.card {
+    background: linear-gradient(145deg, #111c33, #0b1224);
+    padding: 20px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+}
+
+.score {
+    font-size: 42px;
+    font-weight: 700;
+}
+
+.issue {
+    padding: 12px;
+    margin-bottom: 8px;
+    border-left: 4px solid #ff5c5c;
+    background-color: rgba(255,92,92,0.08);
+    border-radius: 6px;
+}
+
+.good {
+    border-left: 4px solid #4ade80;
+    background-color: rgba(74,222,128,0.08);
+}
+
 .highlight {
     background-color: rgba(255, 0, 0, 0.35);
     padding: 2px 4px;
     border-radius: 4px;
 }
+
 .section-title {
     font-size: 18px;
     font-weight: 600;
     margin-bottom: 12px;
 }
+
 small {
     color: #9ca3af;
 }
@@ -68,9 +92,8 @@ def extract_text(pdf):
     text = ""
     with pdfplumber.open(pdf) as p:
         for page in p.pages:
-            page_text = page.extract_text()
-            if page_text:
-                text += page_text + "\n"
+            if page.extract_text():
+                text += page.extract_text() + "\n"
     return text.strip()
 
 def smart_punctuation(text):
@@ -113,8 +136,8 @@ uploaded = st.file_uploader("Upload Resume (PDF only)", type=["pdf"])
 if uploaded:
     resume_text = extract_text(uploaded)
 
-    issues = []
     score = 100
+    issues = []
 
     if smart_punctuation(resume_text):
         issues.append("Smart punctuation detected (ATS incompatible).")
@@ -138,39 +161,39 @@ if uploaded:
 
     score = max(score, 0)
 
-    # ---------------- LAYOUT ----------------
-    left, right = st.columns([1.9, 1.1], gap="large")
+    # ---------------- GRID LAYOUT ----------------
+    st.markdown("<div class='main-grid'>", unsafe_allow_html=True)
 
-    # -------- LEFT: ANALYSIS --------
-    with left:
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("## Overall Score")
-        st.markdown(f"<div class='score'>{score}/100</div>", unsafe_allow_html=True)
-        st.progress(score / 100)
-        st.markdown("</div>", unsafe_allow_html=True)
+    # LEFT — RESUME
+    st.markdown("<div class='resume-panel'>", unsafe_allow_html=True)
+    st.markdown("<div class='section-title'>Resume Preview</div>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='white-space:pre-wrap; font-size:0.85rem; line-height:1.6;'>{highlight_text(resume_text)}</div>",
+        unsafe_allow_html=True
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown("<div class='card'>", unsafe_allow_html=True)
-        st.markdown("## Issues Detected")
-        if issues:
-            for issue in issues:
-                st.markdown(f"<div class='issue'>⚠️ {issue}</div>", unsafe_allow_html=True)
-        else:
-            st.markdown("<div class='issue good'>✅ No issues detected</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+    # RIGHT — ANALYSIS
+    st.markdown("<div>", unsafe_allow_html=True)
 
-    # -------- RIGHT: PERMANENT RESUME VIEW --------
-    with right:
-        st.markdown("<div class='resume-panel'>", unsafe_allow_html=True)
-        st.markdown("<div class='section-title'>Resume Preview</div>", unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div style="white-space:pre-wrap; font-size:0.85rem; line-height:1.6;">
-            {highlight_text(resume_text)}
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("## Overall Score")
+    st.markdown(f"<div class='score'>{score}/100</div>", unsafe_allow_html=True)
+    st.progress(score / 100)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("<div class='card'>", unsafe_allow_html=True)
+    st.markdown("## Issues Detected")
+    if issues:
+        for i in issues:
+            st.markdown(f"<div class='issue'>⚠️ {i}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div class='issue good'>✅ No issues detected</div>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
 
 else:
     st.info("Upload a PDF resume to begin analysis.")
