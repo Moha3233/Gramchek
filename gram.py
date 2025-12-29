@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # --------------------------------------------------
-# Modern UI / SaaS-grade CSS
+# Modern SaaS UI (CSS)
 # --------------------------------------------------
 st.markdown("""
 <style>
@@ -37,7 +37,6 @@ html, body, [class*="css"] {
 .hero h1 {
     font-size: 3rem;
     font-weight: 700;
-    color: #f8fafc;
 }
 .hero p {
     font-size: 1.1rem;
@@ -60,7 +59,7 @@ html, body, [class*="css"] {
     font-weight: 700;
     color: #22c55e;
     text-align: center;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 /* Issues */
@@ -78,7 +77,14 @@ html, body, [class*="css"] {
     border-left: 4px solid #22c55e;
     padding: 18px;
     border-radius: 14px;
-    font-size: 1.05rem;
+}
+
+/* Highlight */
+mark {
+    color: #020617;
+    font-weight: 500;
+    border-radius: 4px;
+    padding: 2px 4px;
 }
 
 /* Footer */
@@ -113,7 +119,21 @@ def extract_text(file):
     return text
 
 # --------------------------------------------------
-# Checks (LOGIC UNCHANGED)
+# Highlight helper
+# --------------------------------------------------
+def highlight_text(text, words, color):
+    for w in words:
+        pattern = re.escape(w)
+        text = re.sub(
+            pattern,
+            f"<mark style='background-color:{color};'>{w}</mark>",
+            text,
+            flags=re.IGNORECASE
+        )
+    return text
+
+# --------------------------------------------------
+# Checks (UNCHANGED LOGIC)
 # --------------------------------------------------
 def spelling_errors(text):
     known = ["begginer", "enviornment", "analysing"]
@@ -164,36 +184,51 @@ def readability_issue(text):
     return textstat.flesch_reading_ease(text) < 30
 
 # --------------------------------------------------
-# Input section
+# Input
 # --------------------------------------------------
 st.markdown('<div class="card">', unsafe_allow_html=True)
 uploaded_file = st.file_uploader("Upload your resume (PDF)", type=["pdf"])
-resume_text = st.text_area("Or paste your resume text", height=220)
+resume_text = st.text_area("Or paste resume text", height=220)
 st.markdown('</div>', unsafe_allow_html=True)
 
 if uploaded_file:
     resume_text = extract_text(uploaded_file)
 
 # --------------------------------------------------
-# Analysis & Output
+# Analysis + Display
 # --------------------------------------------------
 if resume_text:
     issues = []
+    preview_text = resume_text
 
-    if spelling_errors(resume_text):
+    spell = spelling_errors(resume_text)
+    caps = unnecessary_caps(resume_text)
+    reps = repeated_words(resume_text)
+
+    if spell:
         issues.append("Possible spelling mistakes detected")
-    if unnecessary_caps(resume_text):
+        preview_text = highlight_text(preview_text, spell, "#fecaca")
+
+    if caps:
         issues.append("Unnecessary capitalization of common nouns")
-    if repeated_words(resume_text):
+        preview_text = highlight_text(preview_text, caps, "#fde68a")
+
+    if reps:
         issues.append("Repeated words detected")
+        preview_text = highlight_text(preview_text, reps[:5], "#bfdbfe")
+
     if smart_chars(resume_text):
         issues.append("Smart punctuation detected")
+
     if broken_sentences(resume_text):
         issues.append("Sentence broken across lines")
+
     if passive_voice(resume_text):
         issues.append("Passive voice detected")
+
     if tense_mismatch(resume_text):
         issues.append("Verb tense inconsistency")
+
     if long_sentences(resume_text) > 2:
         issues.append("Overly long sentences")
 
@@ -203,34 +238,53 @@ if resume_text:
 
     if empty_sections(resume_text):
         issues.append("Empty section headings found")
+
     if skills_repetition(resume_text):
         issues.append("Skill keyword over-repetition")
+
     if soft_skill_overuse(resume_text):
         issues.append("Soft skill overuse detected")
+
     if length_issue(resume_text):
         issues.append("Resume length outside optimal range")
+
     if readability_issue(resume_text):
         issues.append("Low readability score")
 
-    # Score (same logic)
+    # Score
     score = 100 - (len(issues) * 2)
     score = max(score, 80)
 
-    # Score card
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="score">{score}%</div>', unsafe_allow_html=True)
-    st.progress(score / 100)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Layout
+    col1, col2 = st.columns([2, 1.3])
 
-    # Issues card
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("### Analysis Report")
-    if issues:
-        for issue in issues:
-            st.markdown(f"<div class='issue'>⚠️ {issue}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='success'>✅ Resume is ATS-ready, readable, and professionally written.</div>", unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    with col1:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown(f"<div class='score'>{score}%</div>", unsafe_allow_html=True)
+        st.progress(score / 100)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Analysis Report")
+        if issues:
+            for issue in issues:
+                st.markdown(f"<div class='issue'>⚠️ {issue}</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div class='success'>✅ Resume is ATS-ready and professionally written.</div>", unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    with col2:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.markdown("### Resume Preview")
+        st.markdown(
+            f"""
+            <div style="height:650px; overflow-y:auto; white-space:pre-wrap; font-size:0.88rem; line-height:1.5;">
+            {preview_text}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # --------------------------------------------------
 # Footer
