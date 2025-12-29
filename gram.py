@@ -4,9 +4,72 @@ import re
 from collections import Counter
 import textstat
 
-st.set_page_config(page_title="Enhancv-Style Resume Checker", layout="wide")
-st.title("Enhancv-Style Resume Quality Checker")
-st.caption("All visible + hidden criteria implemented deterministically")
+# -----------------------------
+# Page config
+# -----------------------------
+st.set_page_config(
+    page_title="Enhancv-Style Resume Checker",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# -----------------------------
+# Modern UI (CSS ONLY)
+# -----------------------------
+st.markdown("""
+<style>
+.stApp {
+    background-color: #0f172a;
+    color: #e5e7eb;
+    font-family: Inter, sans-serif;
+}
+
+h1, h2, h3 {
+    color: #f8fafc;
+    font-weight: 600;
+}
+
+[data-testid="metric-container"] {
+    background-color: #020617;
+    border: 1px solid #1e293b;
+    padding: 16px;
+    border-radius: 14px;
+}
+
+.issue-card {
+    background-color: #020617;
+    border-left: 4px solid #ef4444;
+    padding: 12px 16px;
+    margin-bottom: 10px;
+    border-radius: 10px;
+}
+
+.success-card {
+    background-color: #020617;
+    border-left: 4px solid #22c55e;
+    padding: 16px;
+    border-radius: 10px;
+}
+
+.info-card {
+    background-color: #020617;
+    border-left: 4px solid #38bdf8;
+    padding: 14px;
+    border-radius: 10px;
+}
+
+.small-text {
+    color: #94a3b8;
+    font-size: 0.85rem;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# -----------------------------
+# Header
+# -----------------------------
+st.title("Resume Quality Checker")
+st.caption("Enhancv-style | Rule-based | ATS-safe | Deterministic")
 
 # -----------------------------
 # PDF extraction
@@ -27,7 +90,11 @@ def spelling_errors(text):
     return [w for w in known if w in text.lower()]
 
 def unnecessary_caps(text):
-    suspects = ["Systems Biology", "Biological Datasets", "Mathematical Modeling"]
+    suspects = [
+        "Systems Biology",
+        "Biological Datasets",
+        "Mathematical Modeling"
+    ]
     return [w for w in suspects if w in text]
 
 def repeated_words(text):
@@ -48,7 +115,10 @@ def passive_voice(text):
     return bool(re.search(r"\b(was|were|been|being)\b\s+\w+ed", text.lower()))
 
 def tense_mismatch(text):
-    return bool(re.search(r"\bdeveloped\b", text.lower()) and re.search(r"\bdevelops\b", text.lower()))
+    return bool(
+        re.search(r"\bdeveloped\b", text.lower()) and
+        re.search(r"\bdevelops\b", text.lower())
+    )
 
 def long_sentences(text):
     return len([s for s in text.split(".") if len(s.split()) > 30])
@@ -62,12 +132,8 @@ def missing_section(text, section):
 def empty_sections(text):
     return re.findall(r"\n([A-Z ]{4,})\n\s*\n", text)
 
-def section_balance(text):
-    exp = text.upper().count("EXPERIENCE")
-    return exp == 0
-
 # -----------------------------
-# Skills analysis
+# Skills checks
 # -----------------------------
 def skills_repetition(text):
     return text.lower().count("python") > 6
@@ -87,78 +153,97 @@ def readability_issue(text):
     return textstat.flesch_reading_ease(text) < 30
 
 # -----------------------------
-# UI
+# Input section
 # -----------------------------
-file = st.file_uploader("Upload resume PDF", type=["pdf"])
-text = st.text_area("Or paste resume text", height=300)
+uploaded_file = st.file_uploader("Upload resume PDF", type=["pdf"])
+resume_text = st.text_area("Or paste resume text", height=260)
 
-if file:
-    text = extract_text(file)
+if uploaded_file:
+    resume_text = extract_text(uploaded_file)
 
-if text:
+# -----------------------------
+# Analysis
+# -----------------------------
+if resume_text:
     issues = []
 
-    if spelling_errors(text):
+    if spelling_errors(resume_text):
         issues.append("Possible spelling mistakes detected")
 
-    if unnecessary_caps(text):
+    if unnecessary_caps(resume_text):
         issues.append("Unnecessary capitalization of common nouns")
 
-    if repeated_words(text):
+    if repeated_words(resume_text):
         issues.append("Repeated words detected")
 
-    if smart_chars(text):
+    if smart_chars(resume_text):
         issues.append("Smart punctuation detected")
 
-    if broken_sentences(text):
+    if broken_sentences(resume_text):
         issues.append("Sentence broken across lines")
 
-    if passive_voice(text):
+    if passive_voice(resume_text):
         issues.append("Passive voice detected")
 
-    if tense_mismatch(text):
+    if tense_mismatch(resume_text):
         issues.append("Verb tense inconsistency")
 
-    if long_sentences(text) > 2:
+    if long_sentences(resume_text) > 2:
         issues.append("Overly long sentences")
 
     for sec in ["SUMMARY", "EXPERIENCE", "EDUCATION", "SKILLS"]:
-        if missing_section(text, sec):
+        if missing_section(resume_text, sec):
             issues.append(f"Missing section: {sec.title()}")
 
-    if empty_sections(text):
+    if empty_sections(resume_text):
         issues.append("Empty section headings found")
 
-    if section_balance(text):
-        issues.append("Experience section too weak or missing")
-
-    if skills_repetition(text):
+    if skills_repetition(resume_text):
         issues.append("Skill keyword over-repetition")
 
-    if soft_skill_overuse(text):
+    if soft_skill_overuse(resume_text):
         issues.append("Soft skill overuse detected")
 
-    if length_issue(text):
+    if length_issue(resume_text):
         issues.append("Resume length outside optimal range")
 
-    if readability_issue(text):
+    if readability_issue(resume_text):
         issues.append("Low readability score")
 
     # -----------------------------
-    # Score model
+    # Score calculation
     # -----------------------------
-    score = 100 - len(issues) * 2
+    score = 100 - (len(issues) * 2)
     score = max(score, 80)
 
-    st.metric("Estimated Resume Score", f"{score}/100")
+    # -----------------------------
+    # Results UI
+    # -----------------------------
+    st.markdown("## Overall Score")
+    st.progress(score / 100)
+    st.metric("Resume Score", f"{score}/100")
 
     st.markdown("---")
-    if issues:
-        st.subheader("Issues Detected")
-        for i in issues:
-            st.error(i)
-    else:
-        st.success("Resume is clean and optimized")
 
+    if issues:
+        st.markdown("### Issues Detected")
+        for issue in issues:
+            st.markdown(
+                f"<div class='issue-card'>⚠️ {issue}</div>",
+                unsafe_allow_html=True
+            )
+    else:
+        st.markdown(
+            "<div class='success-card'>✅ Resume is clean, readable, and ATS-ready.</div>",
+            unsafe_allow_html=True
+        )
+
+    st.markdown(
+        "<div class='small-text'>Rule-based checker · No AI hallucination · Enhancv-style logic</div>",
+        unsafe_allow_html=True
+    )
 else:
-    st.info("Upload or paste resume to analyze.")
+    st.markdown(
+        "<div class='info-card'>Upload or paste your resume to begin analysis.</div>",
+        unsafe_allow_html=True
+    )
