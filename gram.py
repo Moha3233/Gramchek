@@ -1,199 +1,214 @@
-import streamlit as st
-import pdfplumber
+"""
+STRICT HR RESUME SCORING ENGINE
+Author: HR Evaluation System
+Mode: Rule-based | ATS-style | Offline
+
+INPUT  : Resume text (already extracted from PDF/DOCX)
+OUTPUT : Score (0–100), HR verdict, improvement suggestions
+"""
+
 import re
-from collections import Counter
-import textstat
+from typing import Dict, List
 
-# ---------------- PAGE CONFIG ----------------
-st.set_page_config(
-    page_title="ATS Resume Analyzer",
-    layout="wide",
-    initial_sidebar_state="collapsed"
-)
+# -----------------------------
+# JOB CRITERIA (PDF → JSON LOGIC)
+# -----------------------------
 
-# ---------------- HIDE SIDEBAR COMPLETELY ----------------
-st.markdown("""
-<style>
-[data-testid="stSidebar"] {
-    display: none;
-}
-</style>
-""", unsafe_allow_html=True)
+JOB_CRITERIA = {
+    "mandatory_sections": {
+        "summary": 10,
+        "experience": 25,
+        "skills": 20,
+        "education": 10,
+        "projects": 10
+    },
 
-# ---------------- CUSTOM CSS ----------------
-st.markdown("""
-<style>
-body {
-    background-color: #0e1628;
-    color: #ffffff;
-}
+    "skills": {
+        "core": {
+            "python": 5,
+            "bioinformatics": 5,
+            "molecular docking": 5,
+            "data analysis": 5
+        },
+        "secondary": {
+            "machine learning": 3,
+            "r": 2,
+            "linux": 2
+        }
+    },
 
-.main-grid {
-    display: grid;
-    grid-template-columns: 42% 58%;
-    gap: 24px;
-}
+    "experience_rules": {
+        "minimum_years": 2,
+        "penalty_no_numbers": -5
+    },
 
-.resume-panel {
-    background: #0b1224;
-    padding: 18px;
-    border-radius: 14px;
-    height: 88vh;
-    overflow-y: auto;
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
-}
-
-.card {
-    background: linear-gradient(145deg, #111c33, #0b1224);
-    padding: 20px;
-    border-radius: 14px;
-    margin-bottom: 18px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
+    "ats_rules": {
+        "standard_headings": 5,
+        "no_tables": 3,
+        "simple_format": 2
+    }
 }
 
-.score {
-    font-size: 42px;
-    font-weight: 700;
-}
+# -----------------------------
+# UTILITY FUNCTIONS
+# -----------------------------
 
-.issue {
-    padding: 12px;
-    margin-bottom: 8px;
-    border-left: 4px solid #ff5c5c;
-    background-color: rgba(255,92,92,0.08);
-    border-radius: 6px;
-}
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.lower())
 
-.good {
-    border-left: 4px solid #4ade80;
-    background-color: rgba(74,222,128,0.08);
-}
+def extract_section(text: str, keywords: List[str]) -> str:
+    for k in keywords:
+        pattern = rf"{k}[:\n](.*?)(summary|experience|skills|education|projects|$)"
+        match = re.search(pattern, text, re.DOTALL)
+        if match:
+            return match.group(1)
+    return ""
 
-.highlight {
-    background-color: rgba(255, 0, 0, 0.35);
-    padding: 2px 4px;
-    border-radius: 4px;
-}
+def count_quantified_bullets(text: str) -> int:
+    patterns = [
+        r"\d+%",
+        r"\d+\+",
+        r"increased",
+        r"reduced",
+        r"improved",
+        r"optimized",
+        r"decreased"
+    ]
+    return sum(len(re.findall(p, text)) for p in patterns)
 
-.section-title {
-    font-size: 18px;
-    font-weight: 600;
-    margin-bottom: 12px;
-}
+def extract_years_of_experience(text: str) -> int:
+    matches = re.findall(r"(\d+)\+?\s*(years|yrs)", text)
+    if matches:
+        return max(int(m[0]) for m in matches)
+    return 0
 
-small {
-    color: #9ca3af;
-}
-</style>
-""", unsafe_allow_html=True)
+def uses_standard_headings(text: str) -> bool:
+    headings = ["summary", "experience", "skills", "education", "projects"]
+    return all(h in text for h in headings)
 
-# ---------------- HELPERS ----------------
-def extract_text(pdf):
-    text = ""
-    with pdfplumber.open(pdf) as p:
-        for page in p.pages:
-            if page.extract_text():
-                text += page.extract_text() + "\n"
-    return text.strip()
+# -----------------------------
+# CORE SCORING ENGINE
+# -----------------------------
 
-def smart_punctuation(text):
-    return bool(re.search(r"[“”‘’]", text))
+class ResumeScorer:
 
-def broken_sentences(text):
-    return bool(re.search(r"[a-z]\n[a-z]", text))
+    def __init__(self, resume_text: str):
+        self.resume_text = normalize_text(resume_text)
+        self.sections = {
+            "summary": extract_section(self.resume_text, ["summary", "profile"]),
+            "experience": extract_section(self.resume_text, ["experience", "employment"]),
+            "skills": extract_section(self.resume_text, ["skills", "technical skills"]),
+            "education": extract_section(self.resume_text, ["education"]),
+            "projects": extract_section(self.resume_text, ["projects"])
+        }
+        self.feedback = []
 
-def long_sentences(text):
-    sentences = re.split(r"[.!?]", text)
-    return any(len(s.split()) > 30 for s in sentences)
+    def score_sections(self) -> int:
+        score = 0
+        for sec, weight in JOB_CRITERIA["mandatory_sections"].items():
+            if self.sections[sec]:
+                score += weight
+            else:
+                self.feedback.append(f"Missing mandatory section: {sec.title()}")
+        return score
 
-def repetition(text):
-    words = re.findall(r"\b[a-zA-Z]{4,}\b", text.lower())
-    freq = Counter(words)
-    return any(v > 10 for v in freq.values())
+    def score_skills(self) -> int:
+        score = 0
 
-def readability_issue(text):
-    return textstat.flesch_reading_ease(text) < 40
+        for skill, weight in JOB_CRITERIA["skills"]["core"].items():
+            if skill in self.resume_text:
+                score += weight
+            else:
+                self.feedback.append(f"Missing core skill: {skill}")
 
-def highlight_text(text):
-    text = re.sub(r"[“”‘’]", r"<span class='highlight'>\g<0></span>", text)
-    text = re.sub(r"([a-z])\n([a-z])", r"\1<span class='highlight'>↵</span>\2", text)
+        for skill, weight in JOB_CRITERIA["skills"]["secondary"].items():
+            if skill in self.resume_text:
+                score += weight
 
-    sentences = re.split(r"([.!?])", text)
-    rebuilt = ""
-    for i in range(0, len(sentences)-1, 2):
-        sentence = sentences[i]
-        punct = sentences[i+1]
-        if len(sentence.split()) > 30:
-            sentence = f"<span class='highlight'>{sentence}</span>"
-        rebuilt += sentence + punct
-    return rebuilt
+        return score
 
-# ---------------- UI ----------------
-st.title("📄 ATS Resume Quality Analyzer")
+    def score_experience(self) -> int:
+        score = 0
+        exp_text = self.sections["experience"]
 
-uploaded = st.file_uploader("Upload Resume (PDF only)", type=["pdf"])
+        years = extract_years_of_experience(exp_text)
+        if years >= JOB_CRITERIA["experience_rules"]["minimum_years"]:
+            score += 15
+        else:
+            self.feedback.append("Insufficient years of experience")
 
-if uploaded:
-    resume_text = extract_text(uploaded)
+        quantified = count_quantified_bullets(exp_text)
+        if quantified == 0:
+            score += JOB_CRITERIA["experience_rules"]["penalty_no_numbers"]
+            self.feedback.append("No quantified impact in experience bullets")
 
-    score = 100
-    issues = []
+        return score
 
-    if smart_punctuation(resume_text):
-        issues.append("Smart punctuation detected (ATS incompatible).")
-        score -= 2
+    def score_ats(self) -> int:
+        score = 0
 
-    if broken_sentences(resume_text):
-        issues.append("Sentence broken across lines.")
-        score -= 3
+        if uses_standard_headings(self.resume_text):
+            score += JOB_CRITERIA["ats_rules"]["standard_headings"]
+        else:
+            self.feedback.append("Non-standard section headings")
 
-    if long_sentences(resume_text):
-        issues.append("Overly long sentences detected.")
-        score -= 3
+        # Tables & formatting checks are placeholders (PDF-level analysis)
+        score += JOB_CRITERIA["ats_rules"]["no_tables"]
+        score += JOB_CRITERIA["ats_rules"]["simple_format"]
 
-    if repetition(resume_text):
-        issues.append("Repetitive words reduce ATS clarity.")
-        score -= 2
+        return score
 
-    if readability_issue(resume_text):
-        issues.append("Low readability score.")
-        score -= 3
+    def final_score(self) -> Dict:
+        total = (
+            self.score_sections()
+            + self.score_skills()
+            + self.score_experience()
+            + self.score_ats()
+        )
 
-    score = max(score, 0)
+        total = max(0, min(total, 100))
 
-    # ---------------- GRID LAYOUT ----------------
-    st.markdown("<div class='main-grid'>", unsafe_allow_html=True)
+        verdict = (
+            "Strong Hire" if total >= 85 else
+            "Shortlist" if total >= 70 else
+            "Borderline" if total >= 55 else
+            "Reject"
+        )
 
-    # LEFT — RESUME
-    st.markdown("<div class='resume-panel'>", unsafe_allow_html=True)
-    st.markdown("<div class='section-title'>Resume Preview</div>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div style='white-space:pre-wrap; font-size:0.85rem; line-height:1.6;'>{highlight_text(resume_text)}</div>",
-        unsafe_allow_html=True
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+        return {
+            "final_score": total,
+            "verdict": verdict,
+            "feedback": list(set(self.feedback))
+        }
 
-    # RIGHT — ANALYSIS
-    st.markdown("<div>", unsafe_allow_html=True)
+# -----------------------------
+# EXAMPLE USAGE
+# -----------------------------
 
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("## Overall Score")
-    st.markdown(f"<div class='score'>{score}/100</div>", unsafe_allow_html=True)
-    st.progress(score / 100)
-    st.markdown("</div>", unsafe_allow_html=True)
+if __name__ == "__main__":
+    sample_resume_text = """
+    Summary:
+    Computational Biologist with 3+ years experience.
 
-    st.markdown("<div class='card'>", unsafe_allow_html=True)
-    st.markdown("## Issues Detected")
-    if issues:
-        for i in issues:
-            st.markdown(f"<div class='issue'>⚠️ {i}</div>", unsafe_allow_html=True)
-    else:
-        st.markdown("<div class='issue good'>✅ No issues detected</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    Experience:
+    Improved docking accuracy by 25% using AutoDock Vina.
+    Analyzed 100+ ligands for protein-ligand interactions.
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    Skills:
+    Python, Bioinformatics, Molecular Docking, Data Analysis, Linux
 
-    st.markdown("</div>", unsafe_allow_html=True)
+    Education:
+    MSc Biochemistry
 
-else:
-    st.info("Upload a PDF resume to begin analysis.")
+    Projects:
+    AI-driven Drug Discovery Platform
+    """
+
+    scorer = ResumeScorer(sample_resume_text)
+    result = scorer.final_score()
+
+    print("FINAL SCORE:", result["final_score"])
+    print("HR VERDICT:", result["verdict"])
+    print("IMPROVEMENT FEEDBACK:")
+    for f in result["feedback"]:
+        print("-", f)
