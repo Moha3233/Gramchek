@@ -1,9 +1,11 @@
 import streamlit as st
 import re
 
-# =====================================================
-# STRICT HR JOB CRITERIA
-# =====================================================
+st.set_page_config(page_title="ATS Resume Scorer", layout="wide")
+
+st.title("📄 ATS Resume Scoring Engine (Strict HR Mode)")
+st.caption("Evidence-based resume evaluation • Offline • Rule-driven")
+st.divider()
 
 JOB_CRITERIA = {
     "mandatory_sections": {
@@ -36,10 +38,6 @@ JOB_CRITERIA = {
     }
 }
 
-# =====================================================
-# UTILITY FUNCTIONS
-# =====================================================
-
 def normalize(text):
     return re.sub(r"\s+", " ", text.lower())
 
@@ -65,10 +63,6 @@ def has_standard_headings(text):
             return False
     return True
 
-# =====================================================
-# SCORING ENGINE
-# =====================================================
-
 def score_resume(resume_text):
     feedback = []
     score = 0
@@ -83,14 +77,12 @@ def score_resume(resume_text):
         "projects": extract_section(text, ["projects"])
     }
 
-    # Section scoring
     for sec, weight in JOB_CRITERIA["mandatory_sections"].items():
         if sections[sec]:
             score += weight
         else:
             feedback.append(f"Missing mandatory section: {sec.title()}")
 
-    # Skill scoring
     for skill, w in JOB_CRITERIA["skills"]["core"].items():
         if skill in text:
             score += w
@@ -101,26 +93,22 @@ def score_resume(resume_text):
         if skill in text:
             score += w
 
-    # Experience quality
     years = extract_years(sections["experience"])
-    if years < JOB_CRITERIA["experience_rules"]["minimum_years"]:
-        feedback.append("Insufficient years of experience")
-    else:
+    if years >= JOB_CRITERIA["experience_rules"]["minimum_years"]:
         score += 10
+    else:
+        feedback.append("Insufficient years of experience")
 
     if quantified_impact(sections["experience"]) == 0:
         score += JOB_CRITERIA["experience_rules"]["penalty_no_numbers"]
         feedback.append("No quantified impact in experience")
 
-    # ATS checks
     if has_standard_headings(text):
         score += JOB_CRITERIA["ats_rules"]["standard_headings"]
     else:
         feedback.append("Non-standard or missing section headings")
 
     score += JOB_CRITERIA["ats_rules"]["simple_format"]
-
-    # Normalize score
     score = max(0, min(score, 100))
 
     verdict = (
@@ -132,55 +120,23 @@ def score_resume(resume_text):
 
     return score, verdict, list(set(feedback))
 
-# =====================================================
-# STREAMLIT UI
-# =====================================================
+resume_input = st.text_area("Paste Resume Text Here", height=350)
 
-st.set_page_config(page_title="ATS Resume Scorer", layout="wide")
-
-st.title("📄 ATS Resume Scoring Engine (Strict HR Mode)")
-st.caption("Evidence-based resume evaluation • Offline • Rule-driven")
-
-st.divider()
-
-resume_input = st.text_area(
-    "Paste Resume Text Here",
-    height=350,
-    placeholder="Paste full resume content including headings..."
-)
-
-if st.button("Analyze Resume", type="primary"):
+if st.button("Analyze Resume"):
     if resume_input.strip() == "":
-        st.warning("Please paste resume text before analysis.")
+        st.warning("Please paste resume text.")
     else:
         score, verdict, feedback = score_resume(resume_input)
 
         col1, col2 = st.columns([1, 2])
-
         with col1:
-            st.metric("Final ATS Score", score)
+            st.metric("Final Score", score)
             st.subheader("HR Verdict")
-            st.success(verdict) if verdict in ["Strong Hire", "Shortlist"] else st.error(verdict)
+            st.write(verdict)
 
         with col2:
-            st.subheader("HR Feedback & Gaps")
-            if feedback:
-                for f in feedback:
-                    st.write("❌", f)
-            else:
-                st.write("✅ Resume meets all strict HR criteria")
+            st.subheader("Feedback")
+            for f in feedback:
+                st.write("❌", f)
 
-        st.divider()
-
-        st.subheader("What This Means")
-        if verdict == "Reject":
-            st.info("Resume lacks mandatory evidence required for the role.")
-        elif verdict == "Borderline":
-            st.info("Resume partially meets requirements but needs improvement.")
-        elif verdict == "Shortlist":
-            st.info("Resume meets requirements with minor gaps.")
-        else:
-            st.info("Resume strongly aligns with job requirements.")
-
-st.divider()
-st.caption("Rule-based ATS | No assumptions | If it’s not written, it doesn’t exist.")
+st.caption("If it’s not written, it doesn’t exist.")
