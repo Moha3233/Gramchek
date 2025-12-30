@@ -1,5 +1,5 @@
 import streamlit as st
-import pdfplumber
+import fitz  # PyMuPDF instead of pdfplumber
 import docx
 import re
 import nltk
@@ -31,7 +31,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS (keep the same)
 st.markdown("""
 <style>
     .main-header {
@@ -79,16 +79,28 @@ class ATSResumeScanner:
         }
     
     def extract_text_from_pdf(self, pdf_file):
-        """Extract text from PDF file"""
+        """Extract text from PDF file using PyMuPDF"""
         text = ""
         try:
-            with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
+            # Read the PDF file
+            pdf_bytes = pdf_file.read()
+            pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
+            
+            for page_num in range(len(pdf_document)):
+                page = pdf_document.load_page(page_num)
+                page_text = page.get_text()
+                if page_text:
+                    text += page_text + "\n"
+            
+            pdf_document.close()
         except Exception as e:
             st.error(f"Error reading PDF: {e}")
+            # Fallback: try reading as text
+            try:
+                pdf_file.seek(0)
+                text = pdf_file.read().decode('utf-8', errors='ignore')
+            except:
+                pass
         return text
     
     def extract_text_from_docx(self, docx_file):
@@ -102,11 +114,12 @@ class ATSResumeScanner:
             st.error(f"Error reading DOCX: {e}")
         return text
     
+    # Keep all other methods exactly the same...
+    # [Rest of the class remains unchanged - preprocess_text, extract_email, etc.]
+    
     def preprocess_text(self, text):
         """Clean and preprocess text"""
-        # Convert to lowercase
         text = text.lower()
-        # Remove special characters and extra whitespace
         text = re.sub(r'[^\w\s]', ' ', text)
         text = re.sub(r'\s+', ' ', text)
         return text.strip()
@@ -146,7 +159,6 @@ class ATSResumeScanner:
                 except:
                     continue
         
-        # Fallback: Look for dates
         date_pattern = r'(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\s*\d{4}'
         dates = re.findall(date_pattern, text, re.IGNORECASE)
         if len(dates) >= 2:
@@ -159,11 +171,9 @@ class ATSResumeScanner:
         resume_words = set(word_tokenize(self.preprocess_text(resume_text)))
         job_words = set(word_tokenize(self.preprocess_text(job_description)))
         
-        # Remove stopwords
         resume_words = resume_words - self.stop_words
         job_words = job_words - self.stop_words
         
-        # Get matches
         matches = resume_words.intersection(job_words)
         
         return {
@@ -201,7 +211,6 @@ class ATSResumeScanner:
             feedback.append(("❌ Low keyword match - needs improvement", "match-low"))
         
         # 2. Skills Match
-        # Extract skills from job description
         job_skills = []
         for skill_type in ['technical', 'soft_skills']:
             for skill in self.common_keywords[skill_type]:
@@ -223,7 +232,6 @@ class ATSResumeScanner:
         
         # 3. Experience
         experience_years = self.calculate_experience(resume_text)
-        # Check job description for required experience
         exp_pattern = r'(\d+)\s*(?:years?|yrs?)\s*(?:experience|exp)'
         job_exp_matches = re.findall(exp_pattern, job_description.lower())
         required_exp = int(job_exp_matches[0]) if job_exp_matches else 0
@@ -277,9 +285,8 @@ class ATSResumeScanner:
         else:
             feedback.append(("❌ No contact information found", "match-low"))
         
-        # 6. Formatting (simple check)
+        # 6. Formatting
         formatting_score = criteria_weights['formatting']
-        # Check for bullet points
         if any(char in resume_text for char in ['•', '○', '▪', '■', '- ', '* ']):
             formatting_score = criteria_weights['formatting']
             feedback.append(("✅ Good formatting with bullet points", "match-high"))
@@ -318,7 +325,7 @@ class ATSResumeScanner:
                 'phone': phone,
                 'experience_years': experience_years,
                 'skills_found': found_skills,
-                'keyword_matches': keyword_result['matched_words'][:10],  # Show only top 10
+                'keyword_matches': keyword_result['matched_words'][:10],
                 'keyword_match_percentage': keyword_result['match_percentage']
             }
         }
@@ -402,7 +409,6 @@ def main():
         progress_bar = st.progress(0)
         
         for i, uploaded_file in enumerate(uploaded_files):
-            # Update progress
             progress = (i + 1) / len(uploaded_files)
             progress_bar.progress(progress)
             
